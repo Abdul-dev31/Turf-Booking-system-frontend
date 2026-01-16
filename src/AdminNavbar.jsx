@@ -9,6 +9,11 @@ import { useState } from "react";
 function AdminNavbar() {
   const navigate = useNavigate();
   const [open, setopen] = useState(false);
+
+  const go = (path) => {
+    setopen(false);
+    navigate(path);
+  };
   
   return (
     <div className="adminnavigation">
@@ -20,7 +25,10 @@ function AdminNavbar() {
           />
           {open && (
             <div className="dropdown1">
-              <p onClick={() => navigate("/")} className="paragraph1">
+              <p onClick={() => go("/adminlogin")} className="paragraph1">
+                Admin Login
+              </p>
+              <p onClick={() => go("/")} className="paragraph1">
                 Logout
               </p>
             </div>

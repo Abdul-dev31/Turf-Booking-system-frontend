@@ -130,6 +130,19 @@ function Home() {
       <div className="Home">
         <div className="head">
           <div className="navigation">
+            {open && (
+              <div className="nav-dropdown">
+                <p
+                  onClick={() => {
+                    setOpen(false);
+                    navigate("/adminlogin");
+                  }}
+                  className="nav-dropdown-item"
+                >
+                  Admin Login
+                </p>
+              </div>
+            )}
             <nav className="Nav">
               <IoReorderThreeOutline
                 onClick={() => setOpen(!open)}
@@ -159,15 +172,6 @@ function Home() {
                 Login
               </p>
             )}
-          </div>
-        )}
-
-        {/* Admin Dropdown */}
-        {open && (
-          <div className="dropdown">
-            <p onClick={() => navigate("/adminlogin")} className="paragraph">
-              Admin Login
-            </p>
           </div>
         )}
 

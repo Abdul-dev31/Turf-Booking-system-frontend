@@ -43,6 +43,14 @@ const toLocalIsoDate = (d) => {
   return `${year}-${month}-${day}`;
 };
 
+const addDaysIso = (iso, days) => {
+  if (!iso) return iso;
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setDate(d.getDate() + days);
+  return toLocalIsoDate(d);
+};
+
 // Map UI slot text to database SlotId
 const slotMap = {
   "6am - 7am": "SID001",
@@ -108,12 +116,36 @@ const parseTimeTokenToMinutes = (token) => {
   return hour24 * 60;
 };
 
+// Business rule: late-night slots are considered part of the *next day*
+// for booking/blocking/time-over.
+// This avoids splitting a continuous late-night selection across two dates
+// (e.g., 11pm-12am + 12am-1am should be treated as the next day).
+const getEffectiveDateIsoForSlot = ({ selectedDateIso, slotLabel }) => {
+  if (!selectedDateIso) return selectedDateIso;
+
+  const startTokenMatch = String(slotLabel).match(/\d{1,2}\s*(am|pm)/i);
+  const startMinutes = parseTimeTokenToMinutes(startTokenMatch?.[0]);
+  if (startMinutes == null) return selectedDateIso;
+
+  // Treat 11:00 PM -> 6:00 AM as "next day" slots.
+  if (startMinutes >= 23 * 60 || (startMinutes >= 0 && startMinutes < 6 * 60)) {
+    return addDaysIso(selectedDateIso, 1);
+  }
+
+  return selectedDateIso;
+};
+
 const isSlotInPast = ({ slotLabel, selectedDateIso, now }) => {
   if (!selectedDateIso) return false;
 
+  const effectiveDateIso = getEffectiveDateIsoForSlot({
+    selectedDateIso,
+    slotLabel,
+  });
+
   const todayIso = toLocalIsoDate(now);
-  if (selectedDateIso < todayIso) return true;
-  if (selectedDateIso > todayIso) return false;
+  if (effectiveDateIso < todayIso) return true;
+  if (effectiveDateIso > todayIso) return false;
 
   const startTokenMatch = String(slotLabel).match(/\d{1,2}\s*(am|pm)/i);
   const startMinutes = parseTimeTokenToMinutes(startTokenMatch?.[0]);
@@ -185,6 +217,20 @@ function Bookings() {
       .filter(Boolean);
   }, [selectedMrngslot, selectedEvngslot]);
 
+  const selectedSlotsByEffectiveDate = useMemo(() => {
+    const byDate = {};
+    [...selectedMrngslot, ...selectedEvngslot].forEach((slotLabel) => {
+      const effective = getEffectiveDateIsoForSlot({
+        selectedDateIso: selectedDate,
+        slotLabel,
+      });
+      if (!effective) return;
+      if (!byDate[effective]) byDate[effective] = [];
+      byDate[effective].push(slotLabel);
+    });
+    return byDate;
+  }, [selectedMrngslot, selectedEvngslot, selectedDate]);
+
   const lockSlots = async () => {
     if (!selectedDate) {
       alert("Please choose a date first");
@@ -195,22 +241,36 @@ function Bookings() {
       return;
     }
 
-    try {
-      const res = await fetch("http://localhost:5000/api/admin/lock-slot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: selectedDate,
-          slotIds: selectedSlotIds,
-        }),
-      });
+    const dateKeys = Object.keys(selectedSlotsByEffectiveDate).sort();
+    if (dateKeys.length === 0) {
+      alert("Please select at least one slot");
+      return;
+    }
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Request failed (${res.status})`);
+    try {
+      for (const date of dateKeys) {
+        const slotIdsForDate = (selectedSlotsByEffectiveDate[date] || [])
+          .map((s) => slotMap[s])
+          .filter(Boolean);
+
+        if (slotIdsForDate.length === 0) continue;
+
+        const res = await fetch("http://localhost:5000/api/admin/lock-slot", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date,
+            slotIds: slotIdsForDate,
+          }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `Request failed (${res.status}) for date ${date}`);
+        }
       }
 
-      alert("Slots locked");
+      alert(dateKeys.length > 1 ? "Slots locked for both dates" : "Slots locked");
     } catch (err) {
       alert(`Failed to lock slots: ${err?.message || err}`);
     }
@@ -226,22 +286,36 @@ function Bookings() {
       return;
     }
 
-    try {
-      const res = await fetch("http://localhost:5000/api/admin/unlock-slot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: selectedDate,
-          slotIds: selectedSlotIds,
-        }),
-      });
+    const dateKeys = Object.keys(selectedSlotsByEffectiveDate).sort();
+    if (dateKeys.length === 0) {
+      alert("Please select at least one slot");
+      return;
+    }
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Request failed (${res.status})`);
+    try {
+      for (const date of dateKeys) {
+        const slotIdsForDate = (selectedSlotsByEffectiveDate[date] || [])
+          .map((s) => slotMap[s])
+          .filter(Boolean);
+
+        if (slotIdsForDate.length === 0) continue;
+
+        const res = await fetch("http://localhost:5000/api/admin/unlock-slot", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date,
+            slotIds: slotIdsForDate,
+          }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `Request failed (${res.status}) for date ${date}`);
+        }
       }
 
-      alert("Slots unlocked");
+      alert(dateKeys.length > 1 ? "Slots unlocked for both dates" : "Slots unlocked");
     } catch (err) {
       alert(`Failed to unlock slots: ${err?.message || err}`);
     }

@@ -12,41 +12,52 @@ function Paymentinfo() {
 
   // ✅ Get bookingId from Booking.jsx
   const bookingId = location.state?.bookingId;
+  const bookingIds = location.state?.bookingIds;
   const userId = location.state?.userId;
 
   // UI state
   const [selectFull, setSelectFull] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [paymentInfo, setPaymentInfo] = useState(null);
-  const [bookingDetails, setBookingDetails] = useState(null);
+  const [bundles, setBundles] = useState([]);
 
-  console.log('[Paymentinfo] Received:', { bookingId, userId });
+  const normalizedBookingIds = Array.isArray(bookingIds)
+    ? bookingIds.filter(Boolean)
+    : bookingId
+      ? [bookingId]
+      : [];
+
+  console.log('[Paymentinfo] Received:', { bookingId, bookingIds: normalizedBookingIds, userId });
 
   // 🔒 Safety check
   useEffect(() => {
-    if (!bookingId) {
+    if (normalizedBookingIds.length === 0) {
       alert("Booking ID missing.  Please create a booking first.");
       navigate("/booking");
     }
-  }, [bookingId, navigate]);
+  }, [normalizedBookingIds.length, navigate]);
 
   // ✅ Load payment info AND booking details
   useEffect(() => {
     const loadData = async () => {
-      if (!bookingId) return;
+      if (normalizedBookingIds.length === 0) return;
 
       try {
-        // 1. Get payment info
-        const payRes = await fetch(`${API_BASE}/api/payment/info/${bookingId}`);
-        const payData = await payRes.json();
-        setPaymentInfo(payData);
-        console.log('[Paymentinfo] Payment info:', payData);
+        const results = await Promise.all(
+          normalizedBookingIds.map(async (id) => {
+            const [payRes, bookRes] = await Promise.all([
+              fetch(`${API_BASE}/api/payment/info/${id}`),
+              fetch(`${API_BASE}/api/booking/details/${id}`),
+            ]);
 
-        // 2. Get booking details (date, slots, etc.)
-        const bookRes = await fetch(`${API_BASE}/api/booking/details/${bookingId}`);
-        const bookData = await bookRes.json();
-        setBookingDetails(bookData);
-        console.log('[Paymentinfo] Booking details:', bookData);
+            const payData = await payRes.json();
+            const bookData = await bookRes.json();
+
+            return { bookingId: id, paymentInfo: payData, bookingDetails: bookData };
+          })
+        );
+
+        setBundles(results);
+        console.log('[Paymentinfo] Bundles:', results);
 
       } catch (err) {
         console.error("Failed to load data:", err);
@@ -55,7 +66,7 @@ function Paymentinfo() {
     };
 
     loadData();
-  }, [bookingId]);
+  }, [normalizedBookingIds.join("|")]);
 
   // Load Razorpay SDK
   const loadRazorpayScript = () => {
@@ -78,85 +89,109 @@ function Paymentinfo() {
 
       const paymentType = selectFull ? "Full" : "Advance";
 
-      console.log('[Payment] Creating order:', { bookingId, paymentType });
+      const payOneBooking = async (singleBookingId) => {
+        console.log('[Payment] Creating order:', { bookingId: singleBookingId, paymentType });
 
-      // 1️⃣ CREATE RAZORPAY ORDER
-      const res = await fetch(`${API_BASE}/api/payment/create-order`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingId,
-          paymentType
-        })
-      });
+        // 1️⃣ CREATE RAZORPAY ORDER
+        const res = await fetch(`${API_BASE}/api/payment/create-order`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookingId: singleBookingId,
+            paymentType
+          })
+        });
 
-      const data = await res.json();
-      console.log('[Payment] Order response:', data);
+        const data = await res.json();
+        console.log('[Payment] Order response:', data);
 
-      if (!data.success) {
-        alert("Failed to create payment order");
-        return;
-      }
+        if (!data.success) {
+          throw new Error("Failed to create payment order");
+        }
 
-      // 2️⃣ OPEN RAZORPAY
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID,
-        amount: data.order.amount,
-        currency: "INR",
-        order_id: data.order.id,
-        name: "Kumbakonam Turf",
-        description: "Slot Booking Payment",
+        // 2️⃣ OPEN RAZORPAY (wrap in Promise so we can pay multiple bookings sequentially)
+        return await new Promise((resolve, reject) => {
+          let settled = false;
 
-        handler: async function (response) {
-          console.log('[Payment] Razorpay response:', response);
+          const options = {
+            key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+            amount: data.order.amount,
+            currency: "INR",
+            order_id: data.order.id,
+            name: "Kumbakonam Turf",
+            description: "Slot Booking Payment",
 
-          // 3️⃣ VERIFY PAYMENT
-          const verifyRes = await fetch(`${API_BASE}/api/payment/verify`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              bookingId,
-              amountPaid: data.amountToPay
-            })
-          });
+            handler: async function (response) {
+              if (settled) return;
+              console.log('[Payment] Razorpay response:', response);
 
-          const verifyData = await verifyRes.json();
-          console.log('[Payment] Verify response:', verifyData);
+              try {
+                // 3️⃣ VERIFY PAYMENT
+                const verifyRes = await fetch(`${API_BASE}/api/payment/verify`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature: response.razorpay_signature,
+                    bookingId: singleBookingId,
+                    amountPaid: data.amountToPay
+                  })
+                });
 
-          if (verifyData.success) {
-            navigate("/bookinginfo", {
-              state: { 
-                bookingId,
-                paymentId: response.razorpay_payment_id
+                const verifyData = await verifyRes.json();
+                console.log('[Payment] Verify response:', verifyData);
+
+                if (verifyData.success) {
+                  settled = true;
+                  resolve({ bookingId: singleBookingId, paymentId: response.razorpay_payment_id });
+                } else {
+                  settled = true;
+                  reject(new Error("Payment verification failed"));
+                }
+              } catch (e) {
+                settled = true;
+                reject(e);
               }
-            });
-          } else {
-            alert("Payment verification failed");
-          }
-        },
+            },
 
-        prefill: {
-          contact: userId || "",
-        },
+            prefill: {
+              contact: userId || "",
+            },
 
-        theme: { color: "#3399cc" }
+            theme: { color: "#3399cc" }
+          };
+
+          const rzp = new window.Razorpay(options);
+          rzp.open();
+
+          // Handle payment failure
+          rzp.on("payment.failed", function (response) {
+            if (settled) return;
+            settled = true;
+            console.error("Payment failed:", response);
+            reject(new Error(response?.error?.description || "Please try again"));
+          });
+        });
       };
 
-      const rzp = new window.Razorpay(options);
-      rzp.open();
+      const paymentResults = [];
+      for (const id of normalizedBookingIds) {
+        const paid = await payOneBooking(id);
+        paymentResults.push(paid);
+      }
 
-      // Handle payment failure
-      rzp.on("payment.failed", function (response) {
-        console.error("Payment failed:", response);
-        alert("Payment failed:  " + (response.error?.description || "Please try again"));
+      navigate("/bookinginfo", {
+        state: {
+          bookingId: normalizedBookingIds[0],
+          bookingIds: normalizedBookingIds,
+          payments: paymentResults
+        }
       });
 
     } catch (err) {
       console.error('[Payment] Error:', err);
-      alert("Payment failed");
+      alert("Payment failed:  " + (err?.message || "Please try again"));
     } finally {
       setLoading(false);
     }
@@ -185,7 +220,7 @@ function Paymentinfo() {
   };
 
   // ⏳ Loading state
-  if (!paymentInfo || !bookingDetails) {
+  if (!bundles || bundles.length === 0) {
     return (
       <div className="turf">
         <h3 style={{ textAlign: "center", marginTop: "50px" }}>
@@ -195,13 +230,15 @@ function Paymentinfo() {
     );
   }
 
-  const total = paymentInfo.TotalAmount;
+  const total = bundles.reduce((sum, b) => sum + (Number(b.paymentInfo?.TotalAmount) || 0), 0);
   const advance = Math.round(total * 0.2);
-  const durationHours = bookingDetails.slots?.length || 0;
+
+  const allSlots = bundles.flatMap((b) => b.bookingDetails?.slots || []);
+  const durationHours = allSlots.length || 0;
 
   // Calculate per-hour prices (unique)
-  const perHourPrices = bookingDetails.slots
-    ? [...new Set(bookingDetails.slots.map(s => s.Price))]
+  const perHourPrices = allSlots.length
+    ? [...new Set(allSlots.map(s => s.Price))]
     : [];
   
   const perHourDisplayText = perHourPrices.length === 1
@@ -227,11 +264,15 @@ function Paymentinfo() {
           </div>
 
           <div className="details">
-            <h4 className='texts'>
-              {prettyDate(bookingDetails.bookingDate)} &nbsp; 
-              {bookingDetails.slots?.map(s => s.Timing).join(", ")}
-            </h4>
-            <h5 className='texts'>Day: {getDayName(bookingDetails.bookingDate)}</h5>
+            {bundles.map((b) => (
+              <div key={b.bookingId} style={{ marginBottom: 12 }}>
+                <h4 className='texts'>
+                  {prettyDate(b.bookingDetails?.bookingDate)} &nbsp;
+                  {b.bookingDetails?.slots?.map(s => s.Timing).join(", ")}
+                </h4>
+                <h5 className='texts'>Day: {getDayName(b.bookingDetails?.bookingDate)}</h5>
+              </div>
+            ))}
             <br/>
             <h4 className='texts'>
               Duration:  {durationHours} {durationHours === 1 ? "hour" :  "hours"}
@@ -240,9 +281,9 @@ function Paymentinfo() {
             <h4 className='texts'>(Per hour {perHourDisplayText})</h4>
 
             {/* Per-slot breakdown */}
-            {bookingDetails.slots && bookingDetails.slots.length > 0 && (
+            {allSlots && allSlots.length > 0 && (
               <div style={{ fontSize: 13, marginTop: 10 }}>
-                {bookingDetails.slots.map((s) => (
+                {allSlots.map((s) => (
                   <div key={s.SlotId}>
                     {s.Timing} — ₹{s.Price}
                   </div>

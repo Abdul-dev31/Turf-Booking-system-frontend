@@ -12,6 +12,14 @@ const toLocalIsoDate = (d) => {
   return `${year}-${month}-${day}`;
 };
 
+const addDaysIso = (iso, days) => {
+  if (!iso) return iso;
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  d.setDate(d.getDate() + days);
+  return toLocalIsoDate(d);
+};
+
 // Generate next 7 dates dynamically
 const generateDates = () => {
   const today = new Date();
@@ -56,12 +64,36 @@ const parseTimeTokenToMinutes = (token) => {
   return hour24 * 60;
 };
 
+// Business rule: late-night slots are considered part of the *next day*
+// for booking/blocking/time-over.
+// This avoids splitting a continuous late-night booking across two dates
+// (e.g., selecting 11pm-12am + 12am-1am should be treated as the next day).
+const getEffectiveDateIsoForSlot = ({ selectedDateIso, slotLabel }) => {
+  if (!selectedDateIso) return selectedDateIso;
+
+  const startTokenMatch = String(slotLabel).match(/\d{1,2}\s*(am|pm)/i);
+  const startMinutes = parseTimeTokenToMinutes(startTokenMatch?.[0]);
+  if (startMinutes == null) return selectedDateIso;
+
+  // Treat 11:00 PM -> 6:00 AM as "next day" slots.
+  if (startMinutes >= 23 * 60 || (startMinutes >= 0 && startMinutes < 6 * 60)) {
+    return addDaysIso(selectedDateIso, 1);
+  }
+
+  return selectedDateIso;
+};
+
 const isSlotInPast = ({ slotLabel, selectedDateIso, now }) => {
   if (!selectedDateIso) return false;
 
+  const effectiveDateIso = getEffectiveDateIsoForSlot({
+    selectedDateIso,
+    slotLabel,
+  });
+
   const todayIso = toLocalIsoDate(now);
-  if (selectedDateIso < todayIso) return true;
-  if (selectedDateIso > todayIso) return false;
+  if (effectiveDateIso < todayIso) return true;
+  if (effectiveDateIso > todayIso) return false;
 
   const startTokenMatch = String(slotLabel).match(/\d{1,2}\s*(am|pm)/i);
   const startMinutes = parseTimeTokenToMinutes(startTokenMatch?.[0]);
@@ -150,6 +182,7 @@ function Booking() {
 
   const fromDate = dateList[0].iso;
   const toDate = dateList[dateList.length - 1].iso;
+  const toDateForFetch = addDaysIso(toDate, 1);
 
   // load slot mapping + blocked slots, and expose reload for debug
   useEffect(() => {
@@ -168,8 +201,8 @@ function Booking() {
         });
 
         // 2) fetch blocked slots for 7-day range
-        console.log("[Booking] fetching booked-slots from:", `${API_BASE}/api/booked-slots?from=${fromDate}&to=${toDate}`);
-        const bRes = await fetch(`${API_BASE}/api/booked-slots?from=${fromDate}&to=${toDate}`);
+        console.log("[Booking] fetching booked-slots from:", `${API_BASE}/api/booked-slots?from=${fromDate}&to=${toDateForFetch}`);
+        const bRes = await fetch(`${API_BASE}/api/booked-slots?from=${fromDate}&to=${toDateForFetch}`);
         const bJson = bRes.ok ? await bRes.json() : { blocked: [] };
 
         // DEBUG: show raw server response
@@ -209,7 +242,7 @@ function Booking() {
     window.reloadBlocked = loadBlockedAndSlots;
 
     return () => { mounted = false; };
-  }, [fromDate, toDate]);
+  }, [fromDate, toDateForFetch]);
 
   // convert "6am - 7am" -> "06AM-07AM"
   const toDbTimingKey = (label) => {
@@ -226,9 +259,14 @@ function Booking() {
   // robust blocked check
   const isBlocked = (dateIso, label) => {
     if (!dateIso) return false;
+
+    const effectiveDateIso = getEffectiveDateIsoForSlot({
+      selectedDateIso: dateIso,
+      slotLabel: label,
+    });
     const key1 = toDbTimingKey(label).replace(/\s/g,"").toUpperCase(); // "06AM-07AM"
     const key2 = (label || "").replace(/\s/g,"").toUpperCase();       // "6am-7am"
-    const arr = blockedMap[dateIso] || [];
+    const arr = blockedMap[effectiveDateIso] || [];
 
     // direct matches
     if (arr.includes(key1) || arr.includes(key2)) return true;
@@ -301,34 +339,58 @@ const goToPayment = async () => {
     return; 
   }
 
-  // Build slotIds
+  // Build slotIds grouped by effective booking date (supports cross-midnight)
   const allLabels = [... selectedMrngslot, ...selectedEvngslot];
-  const slotIds = allLabels.map(lbl => {
-    const key = toDbTimingKey(lbl).replace(/\s/g,"").toUpperCase();
-    return slotMap[key];
-  }).filter(Boolean);
+  const labelsByDate = {};
+  for (const lbl of allLabels) {
+    const effective = getEffectiveDateIsoForSlot({ selectedDateIso, slotLabel: lbl });
+    if (!effective) continue;
+    if (!labelsByDate[effective]) labelsByDate[effective] = [];
+    labelsByDate[effective].push(lbl);
+  }
+
+  const bookingDates = Object.keys(labelsByDate).sort();
 
   const finalUser = userIdFromOtp || mobile;
 
   try {
-    console.log('[Booking] Creating booking... ', { finalUser, selectedDateIso, slotIds });
+    const created = [];
+    for (const bookingDate of bookingDates) {
+      const slotIds = (labelsByDate[bookingDate] || [])
+        .map((lbl) => {
+          const key = toDbTimingKey(lbl).replace(/\s/g, "").toUpperCase();
+          return slotMap[key];
+        })
+        .filter(Boolean);
 
-    // ✅ CREATE BOOKING BEFORE NAVIGATING
-    const response = await fetch(`${API_BASE}/api/booking/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: finalUser,
-        bookingDate: selectedDateIso,
-        slotIds
-      })
-    });
+      if (slotIds.length === 0) continue;
 
-    const data = await response.json();
-    console.log('[Booking] Response:', data);
+      console.log('[Booking] Creating booking... ', { finalUser, bookingDate, slotIds });
 
-    if (!response.ok) {
-      alert(data.error || 'Failed to create booking');
+      // ✅ CREATE BOOKING BEFORE NAVIGATING
+      const response = await fetch(`${API_BASE}/api/booking/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: finalUser,
+          bookingDate,
+          slotIds
+        })
+      });
+
+      const data = await response.json();
+      console.log('[Booking] Response:', data);
+
+      if (!response.ok) {
+        alert(data.error || 'Failed to create booking');
+        return;
+      }
+
+      created.push({ bookingId: data.bookingId, bookingDate, slotIds });
+    }
+
+    if (created.length === 0) {
+      alert('Failed to create booking (no valid slots)');
       return;
     }
 
@@ -337,12 +399,13 @@ const goToPayment = async () => {
       localStorage.setItem("userId", finalUser);
     }
 
-    console.log('[Booking] Navigating to payment with bookingId:', data.bookingId);
+    const bookingIds = created.map((b) => b.bookingId);
+    console.log('[Booking] Navigating to payment with bookingIds:', bookingIds);
 
-    // Navigate with bookingId
     navigate("/Paymentinfo", {
       state: {
-        bookingId: data. bookingId,
+        bookingId: bookingIds[0],
+        bookingIds,
         userId: finalUser
       }
     });
