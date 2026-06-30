@@ -1,4 +1,6 @@
-const DEFAULT_API_BASE = "https://turf-booking-system-1-hhe5.onrender.com";
+const DEFAULT_API_BASE = import.meta.env.DEV
+  ? ""
+  : "https://turf-booking-system-1-hhe5.onrender.com";
 
 export const API_BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
 

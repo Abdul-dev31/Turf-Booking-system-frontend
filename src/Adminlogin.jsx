@@ -16,7 +16,7 @@ function AdLogin() {
     }
 
     try {
-      const response = await apiFetch("/admin-api/adminlogin", {
+      const response = await apiFetch("/api/adminlogin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
