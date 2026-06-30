@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = "https://turf-booking-system-hsq1.onrender.com";
+const DEFAULT_API_BASE = "https://turf-booking-system-1-b3cm.onrender.com";
 
 export const API_BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
 
