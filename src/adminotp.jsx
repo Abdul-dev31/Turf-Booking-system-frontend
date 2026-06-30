@@ -19,7 +19,7 @@ function Adminotp() {
     }
 
     try {
-      const response = await axios.post("http://localhost:5000/api/verifyotp", {
+      const response = await axios.post("/api/verifyotp", {
         email,
         otp,
       });
@@ -45,7 +45,7 @@ function Adminotp() {
 
     setLoading(true);
     try {
-      const response = await axios.post("http://localhost:5000/api/sendotp", {
+      const response = await axios.post("/api/sendotp", {
         email,
       });
       alert(response.data.message + " (New OTP generated)");

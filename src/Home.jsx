@@ -3,6 +3,7 @@ import Cards from "./Cards"
 import { useNavigate } from "react-router-dom"
 import { IoReorderThreeOutline } from "react-icons/io5";
 import { useState, useEffect } from "react";
+import { apiFetch } from "./api";
 import { CgProfile } from "react-icons/cg";
 import { FaInstagram, FaLinkedin, FaFacebook, FaStar, FaCheckCircle } from "react-icons/fa";
 import { IoCallOutline, IoMailOutline, IoTrophyOutline, IoTimeOutline, IoShieldCheckmarkOutline } from "react-icons/io5";
@@ -22,7 +23,7 @@ function Home() {
   useEffect(() => {
     const fetchPrices = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/get-prices");
+        const res = await apiFetch("/api/get-prices");
         const data = await res.json();
         setPrices(data);
       } catch (err) {
@@ -43,7 +44,7 @@ function Home() {
     }
 
     try {
-      const res = await fetch("http://localhost:5000/api/session-user", {
+      const res = await apiFetch("/api/session-user", {
         method: "GET",
         headers: { "x-session-id": sessionId }
       });
@@ -85,7 +86,7 @@ function Home() {
     }
 
     try {
-      const res = await fetch("http://localhost:5000/api/session-user", {
+      const res = await apiFetch("/api/session-user", {
         method: "GET",
         headers: { "x-session-id": sessionId }
       });

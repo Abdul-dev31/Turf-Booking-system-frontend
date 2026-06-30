@@ -27,7 +27,7 @@ function Signin() {
     }
 
     try {
-      const response = await axios.put("http://localhost:5000/api/resetpassword", {
+      const response = await axios.put("/api/resetpassword", {
         email: userEmail,
         password,
         repassword,

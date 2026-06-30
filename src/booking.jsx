@@ -1,9 +1,8 @@
 // Booking.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { apiFetch } from "./api";
 
-// API base (matches Otp.jsx). Override with VITE_API_BASE if you like.
-const API_BASE = import.meta?.env?.VITE_API_BASE || "http://localhost:5000";
 
 const toLocalIsoDate = (d) => {
   const year = d.getFullYear();
@@ -62,6 +61,19 @@ const parseTimeTokenToMinutes = (token) => {
   }
 
   return hour24 * 60;
+};
+
+const normalizeTimingKey = (value) => {
+  const parts = String(value || "").replace(/\s/g, "").split("-");
+  if (parts.length !== 2) return String(value || "").replace(/\s/g, "").toUpperCase();
+
+  const fmt = (token) => {
+    const match = token.match(/^(\d{1,2})(am|pm)$/i);
+    if (!match) return token.toUpperCase();
+    return `${match[1].padStart(2, "0")}${match[2].toUpperCase()}`;
+  };
+
+  return `${fmt(parts[0])}-${fmt(parts[1])}`;
 };
 
 // Business rule: late-night slots are considered part of the *next day*
@@ -137,7 +149,7 @@ function Booking() {
       return;
     }
 
-    fetch("http://localhost:5000/api/session-user", {
+    apiFetch("/api/session-user", {
       method: "GET",
       headers: { "x-session-id": sessionId }
     })
@@ -192,17 +204,17 @@ function Booking() {
       try {
         // 1) fetch slot list
         console.log("[Booking] fetching slots from:", `${API_BASE}/api/slots`);
-        const sRes = await fetch(`${API_BASE}/api/slots`);
+        const sRes = await apiFetch(`/api/slots`);
         const sJson = sRes.ok ? await sRes.json() : [];
         const map = {};
         (sJson || []).forEach(s => {
-          const key = (s.Timing || "").replace(/\s/g, "").toUpperCase(); // "06AM-07AM"
-          map[key] = s.SlotId;
+          const key = normalizeTimingKey(s.Timing); // "06AM-07AM"
+          if (key && s.SlotId) map[key] = s.SlotId;
         });
 
         // 2) fetch blocked slots for 7-day range
         console.log("[Booking] fetching booked-slots from:", `${API_BASE}/api/booked-slots?from=${fromDate}&to=${toDateForFetch}`);
-        const bRes = await fetch(`${API_BASE}/api/booked-slots?from=${fromDate}&to=${toDateForFetch}`);
+        const bRes = await apiFetch(`/api/booked-slots?from=${fromDate}&to=${toDateForFetch}`);
         const bJson = bRes.ok ? await bRes.json() : { blocked: [] };
 
         // DEBUG: show raw server response
@@ -213,8 +225,8 @@ function Booking() {
         (bJson.blocked || []).forEach(b => {
           const dt = (b.date || "").slice(0, 10);
           // prefer normalized timingKey, then timing, then slotId
-          const rawTiming = (b.timingKey || b.timing || b.slotId || "").toString();
-          const t = rawTiming.replace(/\s/g, "").toUpperCase(); // e.g. "03PM-04PM" or "SID010"
+          const rawTiming = (b.timingKey || b.timing || b.SlotId || b.slotId || "").toString();
+          const t = normalizeTimingKey(rawTiming); // e.g. "03PM-04PM" or "SID010"
           if (!bmap[dt]) bmap[dt] = [];
           if (!bmap[dt].includes(t)) bmap[dt].push(t);
         });
@@ -238,7 +250,6 @@ function Booking() {
     loadBlockedAndSlots();
 
     // expose reload for console debugging
-    // eslint-disable-next-line no-undef
     window.reloadBlocked = loadBlockedAndSlots;
 
     return () => { mounted = false; };
@@ -246,14 +257,7 @@ function Booking() {
 
   // convert "6am - 7am" -> "06AM-07AM"
   const toDbTimingKey = (label) => {
-    const parts = (label || "").replace(/\s/g, "").split("-");
-    if (parts.length !== 2) return (label || "").toUpperCase();
-    const fmt = (t) => {
-      const m = t.match(/^(\d{1,2})(am|pm)$/i);
-      if (!m) return t.toUpperCase();
-      return m[1].padStart(2,"0") + m[2].toUpperCase();
-    };
-    return `${fmt(parts[0])}-${fmt(parts[1])}`;
+    return normalizeTimingKey(label);
   };
 
   // robust blocked check
@@ -368,7 +372,7 @@ const goToPayment = async () => {
       console.log('[Booking] Creating booking... ', { finalUser, bookingDate, slotIds });
 
       // ✅ CREATE BOOKING BEFORE NAVIGATING
-      const response = await fetch(`${API_BASE}/api/booking/create`, {
+      const response = await apiFetch(`/api/booking/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -588,3 +592,4 @@ const goToPayment = async () => {
 }
 
 export default Booking;
+

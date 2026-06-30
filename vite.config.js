@@ -10,9 +10,10 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
-      '/adminlogin': {
+      '/admin-api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/admin-api/, ''),
       },
     },
   },

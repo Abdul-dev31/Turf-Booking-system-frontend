@@ -1,6 +1,7 @@
 import {useNavigate} from "react-router-dom"
 import { useState } from "react";
 import { IoMailOutline, IoLockClosedOutline, IoShieldCheckmarkOutline, IoEyeOutline, IoEyeOffOutline } from "react-icons/io5";
+import { apiFetch } from "./api";
 
 function AdLogin() {
   const navigate = useNavigate();
@@ -15,7 +16,7 @@ function AdLogin() {
     }
 
     try {
-      const response = await fetch("/adminlogin", {
+      const response = await apiFetch("/admin-api/adminlogin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -13,7 +13,7 @@ function Passchange() {
       return;
     }
     try {
-      const response = await axios.post("http://localhost:5000/api/sendotp", { email });
+      const response = await axios.post("/api/sendotp", { email });
       alert(response.data.message);
       navigate("/adminotp", { state: { email } });
  // pass email to next page

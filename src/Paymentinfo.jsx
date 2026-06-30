@@ -1,10 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { IoIosRadioButtonOn, IoIosRadioButtonOff } from "react-icons/io";
 import logo1 from './assets/OIP.jpg';
-
-// API base
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5000";
+import { apiFetch } from "./api";
 
 function Paymentinfo() {
   const navigate = useNavigate();
@@ -20,11 +18,14 @@ function Paymentinfo() {
   const [loading, setLoading] = useState(false);
   const [bundles, setBundles] = useState([]);
 
-  const normalizedBookingIds = Array.isArray(bookingIds)
-    ? bookingIds.filter(Boolean)
-    : bookingId
-      ? [bookingId]
-      : [];
+  const normalizedBookingIds = useMemo(() => (
+    Array.isArray(bookingIds)
+      ? bookingIds.filter(Boolean)
+      : bookingId
+        ? [bookingId]
+        : []
+  ), [bookingId, bookingIds]);
+  const bookingIdsKey = normalizedBookingIds.join("|");
 
   console.log('[Paymentinfo] Received:', { bookingId, bookingIds: normalizedBookingIds, userId });
 
@@ -45,8 +46,8 @@ function Paymentinfo() {
         const results = await Promise.all(
           normalizedBookingIds.map(async (id) => {
             const [payRes, bookRes] = await Promise.all([
-              fetch(`${API_BASE}/api/payment/info/${id}`),
-              fetch(`${API_BASE}/api/booking/details/${id}`),
+              apiFetch(`/api/payment/info/${id}`),
+              apiFetch(`/api/booking/details/${id}`),
             ]);
 
             const payData = await payRes.json();
@@ -66,7 +67,7 @@ function Paymentinfo() {
     };
 
     loadData();
-  }, [normalizedBookingIds.join("|")]);
+  }, [bookingIdsKey, normalizedBookingIds]);
 
   // Load Razorpay SDK
   const loadRazorpayScript = () => {
@@ -93,7 +94,7 @@ function Paymentinfo() {
         console.log('[Payment] Creating order:', { bookingId: singleBookingId, paymentType });
 
         // 1️⃣ CREATE RAZORPAY ORDER
-        const res = await fetch(`${API_BASE}/api/payment/create-order`, {
+        const res = await apiFetch(`/api/payment/create-order`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -127,7 +128,7 @@ function Paymentinfo() {
 
               try {
                 // 3️⃣ VERIFY PAYMENT
-                const verifyRes = await fetch(`${API_BASE}/api/payment/verify`, {
+                const verifyRes = await apiFetch(`/api/payment/verify`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({

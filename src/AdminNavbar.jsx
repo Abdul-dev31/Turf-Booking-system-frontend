@@ -3,17 +3,20 @@ import { FaHome } from "react-icons/fa";
 import { FaListAlt } from "react-icons/fa";
 import { IoWallet } from "react-icons/io5";
 import { IoReorderThreeOutline } from "react-icons/io5";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 
 function AdminNavbar() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [open, setopen] = useState(false);
 
   const go = (path) => {
     setopen(false);
     navigate(path);
   };
+
+  const isActive = (path) => location.pathname === path;
   
   return (
     <div className="adminnavigation">
@@ -38,17 +41,17 @@ function AdminNavbar() {
         <div className="admin-nav-icons">
           <FaHome
             onClick={() => navigate("/slotbook")}
-            className="bookpage"
+            className={`bookpage ${isActive("/slotbook") ? "active" : ""}`}
             title="Home"
           />
           <FaListAlt
             onClick={() => navigate("/bookingdetails")}
-            className="bookdetailspage"
+            className={`bookdetailspage ${isActive("/bookingdetails") ? "active" : ""}`}
             title="Booking Details"
           />
           <IoWallet
             onClick={() => navigate("/changeupi")}
-            className="upipage"
+            className={`upipage ${isActive("/changeupi") ? "active" : ""}`}
             title="Payment Settings"
           />
         </div>

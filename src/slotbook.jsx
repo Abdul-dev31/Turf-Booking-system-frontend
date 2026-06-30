@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import AdminNavbar from "./AdminNavbar";
+import { apiFetch } from "./api";
 import {
   IoCalendarOutline,
   IoMoonOutline,
@@ -179,145 +180,152 @@ function Bookings() {
   }, []);
 
   const [selectedDate, setSelectedDate] = useState(null);
-  const [selectedMrngslot, setSelectedMrngslot] = useState([]);
-  const [selectedEvngslot, setSelectedEvngslot] = useState([]);
+  const [slotData, setSlotData] = useState({});
 
-  // If cutoff time passes while page is open, clear tomorrow-morning selections.
+  // If cutoff time passes while page is open, do nothing special.
   useEffect(() => {
-    if (!selectedDate) return;
-
-    const now = new Date(nowTick);
-    if (!isTomorrowMorningLocked({ selectedDateIso: selectedDate, now })) return;
-
-    setSelectedMrngslot((prev) => (prev.length ? [] : prev));
-  }, [nowTick, selectedDate]);
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const chooseDate = (iso) => {
     setSelectedDate(iso);
-    setSelectedMrngslot([]);
-    setSelectedEvngslot([]);
+    fetchSlotData(iso);
   };
 
-  const toggleSlot = (slot, type) => {
-    if (type === "morning") {
-      setSelectedMrngslot((prev) =>
-        prev.includes(slot) ? prev.filter((s) => s !== slot) : [...prev, slot]
+  const fetchSlotData = async (dateIso) => {
+    try {
+      const nextDateIso = addDaysIso(dateIso, 1);
+      const datesToLoad = [...new Set([dateIso, nextDateIso].filter(Boolean))];
+
+      const responses = await Promise.all(
+        datesToLoad.map(async (date) => {
+          const res = await apiFetch(`/api/admin/slots?date=${date}`);
+          if (!res.ok) return {};
+          return res.json();
+        })
       );
-      return;
-    }
 
-    setSelectedEvngslot((prev) =>
-      prev.includes(slot) ? prev.filter((s) => s !== slot) : [...prev, slot]
-    );
+      setSlotData(Object.assign({}, ...responses));
+    } catch (err) {
+      console.error("Failed to fetch slot data:", err);
+    }
   };
 
-  const selectedSlotIds = useMemo(() => {
-    return [...selectedMrngslot, ...selectedEvngslot]
-      .map((s) => slotMap[s])
-      .filter(Boolean);
-  }, [selectedMrngslot, selectedEvngslot]);
-
-  const selectedSlotsByEffectiveDate = useMemo(() => {
-    const byDate = {};
-    [...selectedMrngslot, ...selectedEvngslot].forEach((slotLabel) => {
-      const effective = getEffectiveDateIsoForSlot({
-        selectedDateIso: selectedDate,
-        slotLabel,
-      });
-      if (!effective) return;
-      if (!byDate[effective]) byDate[effective] = [];
-      byDate[effective].push(slotLabel);
+  const getSlotInfo = (slotLabel) => {
+    const effectiveDate = getEffectiveDateIsoForSlot({
+      selectedDateIso: selectedDate,
+      slotLabel,
     });
-    return byDate;
-  }, [selectedMrngslot, selectedEvngslot, selectedDate]);
+    const slotId = slotMap[slotLabel];
+    const key = `${slotId}_${effectiveDate}`;
+    return slotData[key] || null;
+  };
 
-  const lockSlots = async () => {
-    if (!selectedDate) {
-      alert("Please choose a date first");
-      return;
-    }
-    if (selectedSlotIds.length === 0) {
-      alert("Please select at least one slot");
-      return;
-    }
-
-    const dateKeys = Object.keys(selectedSlotsByEffectiveDate).sort();
-    if (dateKeys.length === 0) {
-      alert("Please select at least one slot");
-      return;
-    }
-
-    try {
-      for (const date of dateKeys) {
-        const slotIdsForDate = (selectedSlotsByEffectiveDate[date] || [])
-          .map((s) => slotMap[s])
-          .filter(Boolean);
-
-        if (slotIdsForDate.length === 0) continue;
-
-        const res = await fetch("http://localhost:5000/api/admin/lock-slot", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date,
-            slotIds: slotIdsForDate,
-          }),
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `Request failed (${res.status}) for date ${date}`);
-        }
-      }
-
-      alert(dateKeys.length > 1 ? "Slots locked for both dates" : "Slots locked");
-    } catch (err) {
-      alert(`Failed to lock slots: ${err?.message || err}`);
+  const viewSlotDetails = (slotLabel) => {
+    const info = getSlotInfo(slotLabel);
+    if (info && info.isBooked) {
+      alert(`Booking Details:\n\nUser Name: ${info.userName || 'N/A'}\nMobile Number: ${info.mobileNumber || 'N/A'}`);
+    } else if (info && info.isLocked) {
+      alert(`Slot Details:\n\nUser Name: ${info.userName || 'N/A'}\nMobile Number: ${info.mobileNumber || 'N/A'}`);
+    } else {
+      alert("This slot is available for booking.");
     }
   };
 
-  const unlockSlots = async () => {
-    if (!selectedDate) {
-      alert("Please choose a date first");
-      return;
-    }
-    if (selectedSlotIds.length === 0) {
-      alert("Please select at least one slot");
+  const lockSlot = async (slotLabel) => {
+    const effectiveDate = getEffectiveDateIsoForSlot({
+      selectedDateIso: selectedDate,
+      slotLabel,
+    });
+
+    const slotId = slotMap[slotLabel];
+
+    if (!slotId) {
+      alert("Invalid slot");
       return;
     }
 
-    const dateKeys = Object.keys(selectedSlotsByEffectiveDate).sort();
-    if (dateKeys.length === 0) {
-      alert("Please select at least one slot");
-      return;
-    }
+    // Get user details from session/localStorage (modify based on your auth setup)
+    const adminDetails = {
+      adminName: localStorage.getItem("adminName") || "Admin",
+      adminId: localStorage.getItem("adminId") || "Unknown",
+    };
 
     try {
-      for (const date of dateKeys) {
-        const slotIdsForDate = (selectedSlotsByEffectiveDate[date] || [])
-          .map((s) => slotMap[s])
-          .filter(Boolean);
+      const res = await apiFetch("/api/admin/lock-slot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slotId: slotId,
+          date: effectiveDate,
+          lockedBy: adminDetails.adminName,
+          adminId: adminDetails.adminId,
+          timestamp: new Date().toISOString(),
+        }),
+      });
 
-        if (slotIdsForDate.length === 0) continue;
-
-        const res = await fetch("http://localhost:5000/api/admin/unlock-slot", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date,
-            slotIds: slotIdsForDate,
-          }),
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `Request failed (${res.status}) for date ${date}`);
-        }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Request failed (${res.status})`);
       }
 
-      alert(dateKeys.length > 1 ? "Slots unlocked for both dates" : "Slots unlocked");
+      alert(`Slot ${slotLabel} locked successfully`);
+      fetchSlotData(selectedDate); // Refresh slot data
     } catch (err) {
-      alert(`Failed to unlock slots: ${err?.message || err}`);
+      alert(`Failed to lock slot: ${err?.message || err}`);
+    }
+  };
+
+  const unlockSlot = async (slotLabel) => {
+    const effectiveDate = getEffectiveDateIsoForSlot({
+      selectedDateIso: selectedDate,
+      slotLabel,
+    });
+
+    const slotId = slotMap[slotLabel];
+
+    if (!slotId) {
+      alert("Invalid slot");
+      return;
+    }
+
+    // Prompt for unlock reason
+    const reason = prompt("Please enter the reason for unlocking this slot:");
+    if (!reason || reason.trim() === "") {
+      alert("Reason is required to unlock a slot");
+      return;
+    }
+
+    // Get user details from session/localStorage (modify based on your auth setup)
+    const adminDetails = {
+      adminName: localStorage.getItem("adminName") || "Admin",
+      adminId: localStorage.getItem("adminId") || "Unknown",
+    };
+
+    try {
+      const res = await apiFetch("/api/admin/unlock-slot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slotId: slotId,
+          date: effectiveDate,
+          reason: reason.trim(),
+          unlockedBy: adminDetails.adminName,
+          adminId: adminDetails.adminId,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Request failed (${res.status})`);
+      }
+
+      alert(`Slot ${slotLabel} unlocked successfully\nReason: ${reason}`);
+      fetchSlotData(selectedDate); // Refresh slot data
+    } catch (err) {
+      alert(`Failed to unlock slot: ${err?.message || err}`);
     }
   };
 
@@ -364,47 +372,78 @@ function Bookings() {
 
           <div className="slotbook-slot-grid">
             {mrngslot.map((s) => {
-              const selected = selectedMrngslot.includes(s);
               const tomorrowMorningLocked = isTomorrowMorningLocked({
                 selectedDateIso: selectedDate,
                 now: new Date(nowTick),
               });
               const disabled =
+                !selectedDate ||
                 isSlotInPast({
-                slotLabel: s,
-                selectedDateIso: selectedDate,
-                now: new Date(nowTick),
-                }) || tomorrowMorningLocked;
+                  slotLabel: s,
+                  selectedDateIso: selectedDate,
+                  now: new Date(nowTick),
+                }) ||
+                tomorrowMorningLocked;
+              const slotInfo = getSlotInfo(s);
+              const isLocked = slotInfo?.isLocked || false;
+              const isBooked = slotInfo?.isBooked || false;
+              const isUnavailable = isLocked || isBooked;
               return (
-                <div
-                  key={s}
-                  onClick={disabled ? undefined : () => toggleSlot(s, "morning")}
-                  aria-disabled={disabled}
-                  title={
-                    !selectedDate
-                      ? "Choose a date first"
-                      : disabled
-                        ? tomorrowMorningLocked
-                          ? "Tomorrow morning slots are locked after 6:00 PM"
-                          : "Slot time over"
-                        : ""
-                  }
-                  className={`slotbook-slot-chip ${
-                    selected
-                      ? "slotbook-slot-chip--morning-selected"
-                      : "slotbook-slot-chip--morning-default"
-                  }`}
-                  style={
-                    disabled
-                      ? {
-                          opacity: 0.45,
-                          cursor: "not-allowed",
-                          pointerEvents: "none",
-                        }
-                      : undefined
-                  }
-                >
-                  {s}
+                <div key={s} className="slotbook-slot-actions">
+                  <div 
+                    className="slotbook-slot-label" 
+                    onClick={() => selectedDate && viewSlotDetails(s)}
+                    style={{ 
+                      cursor: selectedDate ? 'pointer' : 'default',
+                      backgroundColor: isBooked ? '#fff3e0' : isLocked ? '#ffebee' : 'transparent',
+                      padding: '8px',
+                      borderRadius: '4px',
+                      fontWeight: isUnavailable ? 'bold' : 'normal'
+                    }}
+                    title={isUnavailable ? 'Click to view details' : 'Click to view slot info'}
+                  >
+                    {s} {isBooked ? '📌 BOOKED' : isLocked ? '🔒 LOCKED' : ''}
+                  </div>
+                  <div className="slotbook-slot-buttons">
+                    <button
+                      onClick={() => lockSlot(s)}
+                      disabled={disabled || isUnavailable}
+                      className="slotbook-slot-btn slotbook-slot-btn--lock"
+                      title={
+                        !selectedDate
+                          ? "Choose a date first"
+                          : isBooked
+                          ? "Slot is already booked by customer"
+                          : isLocked
+                          ? "Slot is already locked"
+                          : disabled
+                          ? tomorrowMorningLocked
+                            ? "Tomorrow morning slots are locked after 6:00 PM"
+                            : "Slot time over"
+                          : "Lock this slot"
+                      }
+                    >
+                      🔒 Lock
+                    </button>
+                    <button
+                      onClick={() => unlockSlot(s)}
+                      disabled={disabled || !isLocked || isBooked}
+                      className="slotbook-slot-btn slotbook-slot-btn--unlock"
+                      title={
+                        !selectedDate
+                          ? "Choose a date first"
+                          : isBooked
+                          ? "Customer booked slots cannot be unlocked here"
+                          : !isLocked
+                          ? "Slot is not locked"
+                          : disabled
+                          ? "Slot time over"
+                          : "Unlock this slot"
+                      }
+                    >
+                      🔓 Unlock
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -417,74 +456,74 @@ function Bookings() {
 
           <div className="slotbook-slot-grid">
             {evngslot.map((s) => {
-              const selected = selectedEvngslot.includes(s);
-              const disabled = isSlotInPast({
-                slotLabel: s,
-                selectedDateIso: selectedDate,
-                now: new Date(nowTick),
-              });
+              const disabled =
+                !selectedDate ||
+                isSlotInPast({
+                  slotLabel: s,
+                  selectedDateIso: selectedDate,
+                  now: new Date(nowTick),
+                });
+              const slotInfo = getSlotInfo(s);
+              const isLocked = slotInfo?.isLocked || false;
+              const isBooked = slotInfo?.isBooked || false;
+              const isUnavailable = isLocked || isBooked;
               return (
-                <div
-                  key={s}
-                  onClick={disabled ? undefined : () => toggleSlot(s, "evening")}
-                  aria-disabled={disabled}
-                  title={
-                    !selectedDate
-                      ? "Choose a date first"
-                      : disabled
-                        ? "Slot time over"
-                        : ""
-                  }
-                  className={`slotbook-slot-chip ${
-                    selected
-                      ? "slotbook-slot-chip--evening-selected"
-                      : "slotbook-slot-chip--evening-default"
-                  }`}
-                  style={
-                    disabled
-                      ? {
-                          opacity: 0.45,
-                          cursor: "not-allowed",
-                          pointerEvents: "none",
-                        }
-                      : undefined
-                  }
-                >
-                  {s}
+                <div key={s} className="slotbook-slot-actions">
+                  <div 
+                    className="slotbook-slot-label" 
+                    onClick={() => selectedDate && viewSlotDetails(s)}
+                    style={{ 
+                      cursor: selectedDate ? 'pointer' : 'default',
+                      backgroundColor: isBooked ? '#fff3e0' : isLocked ? '#ffebee' : 'transparent',
+                      padding: '8px',
+                      borderRadius: '4px',
+                      fontWeight: isUnavailable ? 'bold' : 'normal'
+                    }}
+                    title={isUnavailable ? 'Click to view details' : 'Click to view slot info'}
+                  >
+                    {s} {isBooked ? '📌 BOOKED' : isLocked ? '🔒 LOCKED' : ''}
+                  </div>
+                  <div className="slotbook-slot-buttons">
+                    <button
+                      onClick={() => lockSlot(s)}
+                      disabled={disabled || isUnavailable}
+                      className="slotbook-slot-btn slotbook-slot-btn--lock"
+                      title={
+                        !selectedDate
+                          ? "Choose a date first"
+                          : isBooked
+                          ? "Slot is already booked by customer"
+                          : isLocked
+                          ? "Slot is already locked"
+                          : disabled
+                          ? "Slot time over"
+                          : "Lock this slot"
+                      }
+                    >
+                      🔒 Lock
+                    </button>
+                    <button
+                      onClick={() => unlockSlot(s)}
+                      disabled={disabled || !isLocked || isBooked}
+                      className="slotbook-slot-btn slotbook-slot-btn--unlock"
+                      title={
+                        !selectedDate
+                          ? "Choose a date first"
+                          : isBooked
+                          ? "Customer booked slots cannot be unlocked here"
+                          : !isLocked
+                          ? "Slot is not locked"
+                          : disabled
+                          ? "Slot time over"
+                          : "Unlock this slot"
+                      }
+                    >
+                      🔓 Unlock
+                    </button>
+                  </div>
                 </div>
               );
             })}
-          </div>
-
-          <div className="slotbook-actions">
-            <button
-              onClick={lockSlots}
-              className="slotbook-action-btn slotbook-action-btn--lock"
-              disabled={!selectedDate || selectedSlotIds.length === 0}
-              title={
-                !selectedDate
-                  ? "Choose a date"
-                  : selectedSlotIds.length === 0
-                    ? "Select at least one slot"
-                    : ""
-              }
-            >
-              🔒 Lock Slots
-            </button>
-            <button
-              onClick={unlockSlots}
-              className="slotbook-action-btn slotbook-action-btn--unlock"
-              disabled={!selectedDate || selectedSlotIds.length === 0}
-              title={
-                !selectedDate
-                  ? "Choose a date"
-                  : selectedSlotIds.length === 0
-                    ? "Select at least one slot"
-                    : ""
-              }
-            >
-              🔓 Unlock Slots
-            </button>
           </div>
         </div>
       </div>

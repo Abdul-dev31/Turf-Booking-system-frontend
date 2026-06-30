@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { FaSearch } from "react-icons/fa";
 import AdminNavbar from "./AdminNavbar";
+import { apiFetch } from "./api";
 
 function Bookingdetails() {
   const [bookings, setBookings] = useState([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/admin/booking")
+    apiFetch("/api/admin/booking")
       .then(res => res.json())
       .then(data => setBookings(data))
       .catch(err => console.error("Fetch error:", err));
@@ -220,3 +221,4 @@ function Bookingdetails() {
 }
 
 export default Bookingdetails;
+
