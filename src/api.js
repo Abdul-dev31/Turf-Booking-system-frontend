@@ -1,8 +1,12 @@
+import axios from "axios";
+
 const DEFAULT_API_BASE = import.meta.env.DEV
   ? ""
-  : "https://turf-booking-system-1-hhe5.onrender.com";
+  : "https://turf-booking-system-1ux8.onrender.com";
 
 export const API_BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
+
+axios.defaults.baseURL = API_BASE;
 
 export function apiFetch(path, options) {
   if (!path || typeof path !== "string") {

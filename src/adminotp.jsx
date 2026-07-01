@@ -2,6 +2,9 @@ import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { IoMailOutline, IoKeyOutline, IoShieldCheckmarkOutline } from "react-icons/io5";
+import { API_BASE } from "./api";
+
+axios.defaults.baseURL = API_BASE;
 
 function Adminotp() {
   const [otp, setOtp] = useState("");
