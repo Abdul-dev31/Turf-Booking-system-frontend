@@ -1,7 +1,7 @@
 // Booking.jsx
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { apiFetch } from "./api";
+import { apiFetch, API_BASE } from "./api";
 
 
 const toLocalIsoDate = (d) => {
