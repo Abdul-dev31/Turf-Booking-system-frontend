@@ -22,7 +22,7 @@ function Adminotp() {
     }
 
     try {
-      const response = await axios.post("/api/verifyotp", {
+      const response = await axios.post("/api/verify-otp", {
         email,
         otp,
       });
@@ -48,7 +48,7 @@ function Adminotp() {
 
     setLoading(true);
     try {
-      const response = await axios.post("/api/sendotp", {
+      const response = await axios.post("/api/send-otp", {
         email,
       });
       alert(response.data.message + " (New OTP generated)");

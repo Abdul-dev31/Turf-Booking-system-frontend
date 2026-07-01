@@ -16,7 +16,7 @@ function Passchange() {
       return;
     }
     try {
-      const response = await axios.post("/api/sendotp", { email });
+      const response = await axios.post("/api/send-otp", { email });
       alert(response.data.message);
       navigate("/adminotp", { state: { email } });
  // pass email to next page
