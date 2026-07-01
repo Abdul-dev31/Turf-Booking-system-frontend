@@ -2,7 +2,7 @@ import axios from "axios";
 
 const DEFAULT_API_BASE = import.meta.env.DEV
   ? ""
-  : "https://turf-booking-system-1ux8.onrender.com";
+  : "https://turf-booking-system-2-ucet.onrender.com";
 
 export const API_BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
 
